@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<!-- ================================================================
+     スケジュール共有（編集用）  画面の骨組み（HTML）
+     ・右側の <!- - ～ - -> は説明です（画面には表示されません）
+     ・見た目は index.css、動きは index.js に書いてあります
+     ================================================================ -->
+<html lang="ja">                                                                <!-- 日本語のページです、という宣言 -->
+<head>
+  <meta charset="UTF-8">                                                        <!-- 文字化けしないための文字コード指定 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">        <!-- スマホでもちょうどいい大きさで表示する -->
+  <title>スケジュール共有 編集用</title>                                       <!-- ブラウザのタブに出る名前 -->
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">  <!-- アイコン集（Font Awesome）を読み込む -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">                   <!-- フォントのサーバーに先につないでおく（表示が速くなる） -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">  <!-- 文字のデザイン（フォント）を読み込む -->
+  <link rel="stylesheet" href="index.css">                                      <!-- 自分で作った見た目の設定を読み込む -->
+</head>
+<body>
+  <div class="app">                                                             <!-- アプリ全体を包む箱 -->
+
+    <!-- ===== ヘッダー（いちばん上の帯） ===== -->
+    <header class="tech-header">
+      <div class="header-auth">                                                 <!-- 右上のログイン／ログアウト -->
+        <button type="button" id="loginBtn" onclick="openLoginModal()" class="btn-login">  <!-- ログインボタン（押すとパスワード画面） -->
+          <i class="fa-solid fa-right-to-bracket"></i> ログイン
+        </button>
+        <div id="loggedInInfo" class="logged-in-info hidden">                   <!-- ログイン中だけ表示される部分 -->
+          <span class="user-badge"><i class="fa-solid fa-user-check"></i> <span id="loggedInName"></span></span>  <!-- 「○○先生でログイン中」 -->
+          <button type="button" id="changePwBtn" onclick="openPasswordModal()" class="btn-logout hidden">  <!-- ログイン中（先生・管理者）だけ表示 -->
+            <i class="fa-solid fa-key"></i> パスワード変更
+          </button>
+          <button type="button" onclick="logout()" class="btn-logout">
+            <i class="fa-solid fa-right-from-bracket"></i> ログアウト
+          </button>
+        </div>
+      </div>
+
+      <div class="header-main">
+        <div>
+          <div class="header-tag"><i class="fa-solid fa-bolt"></i> 校内情報共有ダッシュボード</div>
+          <h1 class="header-title">スケジュール共有 編集用</h1>                <!-- ページの大見出し -->
+          <p class="header-subtitle">Schedule &amp; Event Management</p>        <!-- &amp; は「&」の書き方 -->
+        </div>
+
+        <div class="stats">                                                     <!-- 予定の件数（JSが自動で数字を入れる） -->
+          <div class="stat"><span class="stat-label">全予定</span><span id="statTotalCount" class="stat-value">0</span></div>
+          <div class="stat"><span class="stat-label">本日の予定</span><span id="statTodayCount" class="stat-value stat-value--today">0</span></div>
+          <div class="stat"><span class="stat-label">終了した予定</span><span id="statPastCount" class="stat-value stat-value--past">0</span></div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+
+      <!-- ===== 予定の登録フォーム ===== -->
+      <section class="form-card">
+        <h2 class="form-title">
+          <span class="form-title-icon"><i id="formTitleIcon" class="fa-solid fa-calendar-plus"></i></span>  <!-- 編集中はペンのアイコンに変わる -->
+          <span id="formTitleText">新しいスケジュールを追加</span>              <!-- 編集中は「予定を編集」に変わる -->
+        </h2>
+
+        <form id="scheduleForm" onsubmit="handleFormSubmit(event)" class="form">  <!-- 送信するとJSの handleFormSubmit が動く -->
+          <div class="form-row form-row--2">                                    <!-- 1行目：担当・種別（広い画面では横に2つ並ぶ） -->
+            <div>
+              <label for="teacherSelect" class="field-label">担当（先生の名前） <span class="required">*</span></label>
+              <div class="select-wrap">
+                <select id="teacherSelect" required class="input input--select">  <!-- 先生の選択肢は JS が自動で追加する -->
+                  <option value="">名前を選択...</option>
+                </select>
+                <i class="fa-solid fa-chevron-down select-arrow"></i>           <!-- 右端の ▼ マーク -->
+              </div>
+            </div>
+            <div>
+              <label for="typeSelect" class="field-label">種別 <span class="required">*</span></label>
+              <div class="select-wrap">
+                <select id="typeSelect" required onchange="updateTaskRequired()" class="input input--select"></select>  <!-- 種別の選択肢も JS が自動で作る -->
+                <i class="fa-solid fa-chevron-down select-arrow"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row form-row--3">                                    <!-- 2行目：日付・開始時間・終了時間（広い画面では3つ並ぶ） -->
+            <div class="field">
+              <label for="dateInput" class="field-label">日付 <span class="required">*</span></label>
+              <input type="date" id="dateInput" required class="input">         <!-- カレンダーから選べる日付欄 -->
+            </div>
+            <div class="field">
+              <label for="startHourInput" class="field-label">開始時間 <span class="required">*</span></label>
+              <div class="time-split-group">
+                <div class="time-field">                                          <!-- 入力欄と▼ボタンをまとめる箱 -->
+                  <input type="text" id="startHourInput" required inputmode="numeric" maxlength="2" autocomplete="off" placeholder="時" class="input input--time">  <!-- キーボードで打てる -->
+                  <button type="button" class="time-arrow" tabindex="-1" aria-label="候補を表示"><i class="fa-solid fa-chevron-down"></i></button>  <!-- ▼：押すと候補の一覧を（入力内容に関係なく）全部表示 -->
+                </div>
+                <span class="time-colon">:</span>
+                <div class="time-field">                                          <!-- 入力欄と▼ボタンをまとめる箱 -->
+                  <input type="text" id="startMinuteInput" inputmode="numeric" maxlength="2" autocomplete="off" placeholder="分" class="input input--time">  <!-- キーボードで打てる -->
+                  <button type="button" class="time-arrow" tabindex="-1" aria-label="候補を表示"><i class="fa-solid fa-chevron-down"></i></button>  <!-- ▼：押すと候補の一覧を（入力内容に関係なく）全部表示 -->
+                </div>
+              </div>
+              <div class="check-group">
+                <label class="check-label"><input type="checkbox" id="allDayStart" onchange="onTimeCheckChange('allDayStart')"> 一日</label>
+                <label class="check-label"><input type="checkbox" id="undecidedStart" onchange="onTimeCheckChange('undecidedStart')"> 未定</label>
+              </div>
+            </div>
+            <div class="field">
+              <label for="endHourInput" class="field-label">終了時間 <span class="required">*</span></label>
+              <div class="time-split-group">
+                <div class="time-field">                                          <!-- 入力欄と▼ボタンをまとめる箱 -->
+                  <input type="text" id="endHourInput" required inputmode="numeric" maxlength="2" autocomplete="off" placeholder="時" class="input input--time">  <!-- キーボードで打てる -->
+                  <button type="button" class="time-arrow" tabindex="-1" aria-label="候補を表示"><i class="fa-solid fa-chevron-down"></i></button>  <!-- ▼：押すと候補の一覧を（入力内容に関係なく）全部表示 -->
+                </div>
+                <span class="time-colon">:</span>
+                <div class="time-field">                                          <!-- 入力欄と▼ボタンをまとめる箱 -->
+                  <input type="text" id="endMinuteInput" inputmode="numeric" maxlength="2" autocomplete="off" placeholder="分" class="input input--time">  <!-- キーボードで打てる -->
+                  <button type="button" class="time-arrow" tabindex="-1" aria-label="候補を表示"><i class="fa-solid fa-chevron-down"></i></button>  <!-- ▼：押すと候補の一覧を（入力内容に関係なく）全部表示 -->
+                </div>
+              </div>
+              <div class="check-group">
+                <label class="check-label"><input type="checkbox" id="allDayEnd" onchange="onTimeCheckChange('allDayEnd')"> <span id="allDayEndLabel">終日</span></label>
+                <label class="check-label"><input type="checkbox" id="undecidedEnd" onchange="onTimeCheckChange('undecidedEnd')"> 未定</label>
+              </div>
+            </div>
+          </div>
+
+          <div>                                                                 <!-- 3行目：予定の内容（種別が「その他」のときだけ必須） -->
+            <label for="taskInput" class="field-label">予定・内容 <span id="taskRequiredMark" class="mark-optional">(任意)</span></label>
+            <textarea id="taskInput" rows="3" placeholder="例：学年会議、保護者会準備、サッカー部練習指導 など&#10;（Enterキーで改行できます）" class="input"></textarea>
+          </div>
+
+          <div>                                                                 <!-- 4行目：生徒対応できるか -->
+            <label for="studentSupportInput" class="field-label">生徒対応</label>
+            <div class="select-wrap">
+              <select id="studentSupportInput" class="input input--select">
+                <option value="可">可</option>
+                <option value="時間による">時間による</option>
+                <option value="不可" selected>不可</option>                     <!-- selected ＝ 最初から選ばれている -->
+              </select>
+              <i class="fa-solid fa-chevron-down select-arrow"></i>
+            </div>
+          </div>
+
+          <div class="form-actions">                                            <!-- 送信ボタンとキャンセルボタン -->
+            <button type="submit" class="btn-submit">
+              <i id="submitBtnIcon" class="fa-solid fa-plus"></i> <span id="submitBtnText">スケジュールを追加</span>
+            </button>
+            <button type="button" id="cancelEditBtn" onclick="cancelEdit()" class="btn-cancel hidden">キャンセル</button>  <!-- 編集中だけ表示される -->
+          </div>
+        </form>
+      </section>
+
+      <!-- ===== 絞り込みボタン・一括削除ボタン ===== -->
+      <div class="toolbar">
+        <button type="button" onclick="toggleFilterPanel()" class="btn-filter">  <!-- 押すと下の絞り込みパネルが開く -->
+          <i class="fa-solid fa-filter icon-accent"></i> 絞り込み
+          <span id="filterActiveBadge" class="filter-badge hidden">0</span>     <!-- 選んでいる条件の数 -->
+          <i id="filterChevron" class="fa-solid fa-chevron-down chevron"></i>
+        </button>
+        <button onclick="requestDeletePastTasks()" class="btn-danger-soft">
+          <i class="fa-solid fa-broom"></i> 終了した予定を一括削除
+        </button>
+      </div>
+
+      <!-- ===== 絞り込みパネル（中のタブは JS が自動で作る） ===== -->
+      <div id="filterPanel" class="filter-panel hidden">
+        <section class="filter-section">
+          <div class="section-head">
+            <h2 class="section-title"><i class="fa-solid fa-user-gear icon-accent"></i> 担当の先生で絞り込み</h2>
+            <span id="currentTeacherLabel" class="section-status">表示中: 全員</span>
+          </div>
+          <div id="teacherTabs" class="tab-row"></div>                          <!-- 先生のタブが入る場所 -->
+        </section>
+
+        <section class="filter-section">
+          <div class="section-head">
+            <h2 class="section-title"><i class="fa-solid fa-calendar-days icon-accent"></i> 日にちで絞り込み（今日から1週間後まで）</h2>
+            <span id="currentDateLabel" class="section-status">表示中: すべての日</span>
+          </div>
+          <div id="dateTabs" class="tab-row"></div>                             <!-- 日にちのタブが入る場所 -->
+        </section>
+
+        <section class="filter-section">
+          <div class="section-head">
+            <h2 class="section-title"><i class="fa-solid fa-tags icon-accent"></i> 種別で絞り込み</h2>
+            <span id="currentTypeLabel" class="section-status">表示中: すべての種別</span>
+          </div>
+          <div id="typeTabs" class="tab-row"></div>                             <!-- 種別のタブが入る場所 -->
+        </section>
+      </div>
+
+      <!-- ===== 今後の予定・本日の予定 ===== -->
+      <section class="list-section">
+        <div class="list-head">
+          <h2 class="list-title"><i class="fa-solid fa-calendar-day icon-accent"></i> 今後の予定・本日の予定</h2>
+          <span id="upcomingCountText" class="count-text">0 件</span>
+        </div>
+        <ul id="upcomingTaskList" class="task-list"></ul>                       <!-- 予定カードが JS で入る場所 -->
+      </section>
+
+      <!-- ===== 終了した予定 ===== -->
+      <section class="past-section">
+        <details class="past-details" open>                                     <!-- <details> はクリックで開け閉めできる箱（open＝最初は開いている） -->
+          <summary class="past-summary">                                        <!-- 開け閉めするときにクリックする見出し -->
+            <div class="past-summary-title">
+              <i class="fa-solid fa-circle-check past-icon"></i>
+              <span>終了した予定</span>
+              <span id="pastCountText" class="past-count">0 件</span>
+            </div>
+            <i class="fa-solid fa-chevron-down past-chevron"></i>
+          </summary>
+          <ul id="pastTaskList" class="past-list"></ul>                         <!-- 終了した予定カードが入る場所 -->
+        </details>
+      </section>
+    </main>
+
+    <footer class="footer"><p>スケジュール共有 編集用 &copy; 校内連携・校務効率化</p></footer>  <!-- &copy; は「©」マーク -->
+  </div>
+
+  <!-- ===== パスワード入力ダイアログ（ログイン／本人確認で共通） ===== -->
+  <div id="authModal" class="modal-overlay hidden">                             <!-- 画面全体を暗くする背景 -->
+    <form onsubmit="event.preventDefault(); submitAuth();" class="modal-card">  <!-- Enterキーでも「確認」になるように form にしている -->
+      <div class="modal-icon modal-icon--info"><i class="fa-solid fa-lock"></i></div>
+      <h3 id="authTitle" class="modal-title modal-title--sm">ログイン</h3>
+      <p id="authMessage" class="modal-message modal-message--sm">パスワードを入力してください</p>
+      <input type="password" id="authPassword" autocomplete="off" placeholder="パスワード" class="input">  <!-- 入力した文字が ●●● で隠れる -->
+      <p id="authError" class="auth-error hidden"><i class="fa-solid fa-circle-exclamation"></i> パスワードが違います</p>
+      <div class="modal-actions modal-actions--auth">
+        <button type="button" onclick="closeAuthModal()" class="modal-btn modal-btn--sm modal-btn--cancel">キャンセル</button>
+        <button type="submit" class="modal-btn modal-btn--sm modal-btn--primary">確認</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ===== パスワード変更ダイアログ ===== -->
+  <div id="pwModal" class="modal-overlay hidden">
+    <form onsubmit="event.preventDefault(); submitPasswordChange();" class="modal-card">
+      <div class="modal-icon modal-icon--info"><i class="fa-solid fa-key"></i></div>
+      <h3 class="modal-title modal-title--sm">パスワードの変更</h3>
+      <p id="pwModalMessage" class="modal-message modal-message--sm">新しいパスワードを入力してください</p>
+      <div id="targetTeacherWrap" class="select-wrap input--below hidden">     <!-- 管理者のときだけ表示される「先生の選択欄」 -->
+        <select id="targetTeacher" class="input input--select">                <!-- パスワードを変える先生を選ぶ（選択肢は JS が自動で入れる） -->
+          <option value="">パスワードを変更する先生を選択...</option>
+        </select>
+        <i class="fa-solid fa-chevron-down select-arrow"></i>
+      </div>
+      <input type="password" id="newPassword" autocomplete="new-password" placeholder="新しいパスワード" class="input">  <!-- 新しいパスワード -->
+      <input type="password" id="newPasswordConfirm" autocomplete="new-password" placeholder="もう一度入力（確認用）" class="input input--stacked">  <!-- 打ち間違い防止の確認用 -->
+      <p id="pwError" class="auth-error hidden"></p>
+      <p id="pwSuccess" class="auth-success hidden"><i class="fa-solid fa-circle-check"></i> <span id="pwSuccessText">パスワードを変更しました</span></p>
+      <div class="modal-actions modal-actions--auth">
+        <button type="button" onclick="closePasswordModal()" class="modal-btn modal-btn--sm modal-btn--cancel">キャンセル</button>
+        <button type="submit" class="modal-btn modal-btn--sm modal-btn--primary">変更する</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ===== 確認ダイアログ（削除の確認など） ===== -->
+  <div id="customModal" class="modal-overlay modal-overlay--fade is-faded hidden">
+    <div class="modal-card modal-card--pop" id="modalCard">
+      <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>  <!-- ⚠ マーク -->
+      <h3 id="modalTitle" class="modal-title">削除の確認</h3>                   <!-- タイトル・文・ボタンの文字は JS が入れ替える -->
+      <p id="modalMessage" class="modal-message">この処理を実行しますか？</p>
+      <div class="modal-actions">
+        <button onclick="closeModal()" class="modal-btn modal-btn--cancel">キャンセル</button>
+        <button id="modalConfirmBtn" class="modal-btn modal-btn--danger">実行する</button>
+      </div>
+    </div>
+  </div>
+
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>  <!-- Firebase の基本部品 -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>  <!-- Firebase のデータベース部品 -->
+  <script src="index.js"></script>                                              <!-- 自分で作ったプログラム（必ず最後に読み込む） -->
+</body>
+</html>
