@@ -210,6 +210,11 @@ body {
 }
 .btn-logout { padding: 0.5rem 0.875rem; border: 1px solid #475569; }
 
+/* スマホ表示（640px未満）：ログイン後の右上は名前だけ・ボタンは絵だけにする */
+.header-auth .login-suffix { display: none; }                          /* 「でログイン中」を隠す → 先生の名前だけになる */
+.header-auth .btn-text { display: none; }                              /* 「パスワード変更」「ログアウト」の文字を隠す → 絵だけになる */
+.header-auth .btn-logout { padding: 0.5rem 0.625rem; }                  /* 絵だけのボタンが横に広がりすぎないように */
+
 /* 集計カウンター */
 .stats { display: flex; align-items: center; gap: 0.5rem; align-self: flex-start; }
 .stat {                                                             /* 数字の入った小さな箱 */
@@ -790,6 +795,9 @@ input[type="time"]::-webkit-date-and-time-value { text-align: left; min-width: 0
 @media (min-width: 640px) {                                         /* 画面の幅が 640px 以上（タブレット・PC）のとき */
   body { padding: 1.5rem; }
   .tech-header { padding: 1.75rem; }
+  .header-auth .login-suffix { display: inline; }                       /* PCでは「○○先生でログイン中」に戻す */
+  .header-auth .btn-text { display: inline; }                           /* PCでは「パスワード変更」「ログアウト」の文字も出す */
+  .header-auth .btn-logout { padding: 0.5rem 0.875rem; }                /* PCではボタンの余白を元に戻す */
   .header-main { flex-direction: row; align-items: center; }        /* タイトルと集計を横並びに */
   .header-title { font-size: var(--fs-3xl); line-height: 2.25rem; }
   .header-subtitle { font-size: var(--fs-sm); }
