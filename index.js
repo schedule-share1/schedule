@@ -236,8 +236,8 @@ function updateLoginUI() {                                                // ロ
   const loggedIn = !!currentTeacher || isMaster;
   el("loginBtn").classList.toggle("hidden", loggedIn);                    // ログイン中は「ログイン」ボタンを隠す
   el("loggedInInfo").classList.toggle("hidden", !loggedIn);               // ログイン中は「○○でログイン中」を見せる
-  el("loggedInName").textContent = isMaster ? "管理者でログイン中"
-    : currentTeacher ? `${currentTeacher}でログイン中` : "";
+  el("loggedInName").textContent = isMaster ? "管理者"                     // 名前だけ入れる（「でログイン中」はHTMLの .login-suffix で、スマホでは隠す）
+    : currentTeacher ? currentTeacher : "";
   el("changePwBtn").classList.toggle("hidden", !loggedIn);                // ログイン中（先生・管理者）だけ「パスワード変更」ボタンを出す
   applyTeacherLock();
   renderSchedule();
