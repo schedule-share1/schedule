@@ -79,6 +79,9 @@ document.addEventListener("DOMContentLoaded", () => {                     // HTM
 
   updateTaskRequired();                                                   // 「予定・内容」が必須かどうかの表示を整える
   updateLoginUI();                                                        // ログインボタンの表示を整える
+  wrapHeaderAuthText();                                                   // ボタン文字を span で包む（古いHTMLでも隠せるように）
+  updateHeaderAuthMobile();                                               // スマホ幅なら文字を隠す（CSSだけに頼らない）
+  window.addEventListener("resize", updateHeaderAuthMobile);              // 回転・画面幅の変化でも切り替える
   renderFilterTabs();                                                     // 絞り込みタブ（先生・日にち・種別）を作る
 
   setInterval(checkDateChange, 30 * 1000);                                // 30秒ごとに「日付が変わったか」「予定が終わったか」を確認
@@ -239,8 +242,40 @@ function updateLoginUI() {                                                // ロ
   el("loggedInName").textContent = isMaster ? "管理者"                     // 名前だけ入れる（「でログイン中」はHTMLの .login-suffix で、スマホでは隠す）
     : currentTeacher ? currentTeacher : "";
   el("changePwBtn").classList.toggle("hidden", !loggedIn);                // ログイン中（先生・管理者）だけ「パスワード変更」ボタンを出す
+  wrapHeaderAuthText();                                                   // ログイン状態が変わっても、文字を包んだままにする
+  updateHeaderAuthMobile();                                               // スマホ幅なら文字を隠す
   applyTeacherLock();
   renderSchedule();
+}
+
+function wrapHeaderAuthText() {                                           // パスワード変更・ログアウトの文字を span.btn-text で包む
+  // 前回の修正は「HTMLで文字を span で包み、CSSで隠す」方式だったが、HTMLかCSSのどちらか
+  // 1つでも古いままだと文字が残る。JSで包めば、index.js だけ差し替えても隠せるようになる。
+  document.querySelectorAll("#loggedInInfo .btn-logout").forEach(btn => {
+    if (btn.querySelector(".btn-text")) return;                           // すでに包まれていれば何もしない
+    const textNode = [...btn.childNodes].find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim() !== "");
+    if (!textNode) return;
+    const span = document.createElement("span");
+    span.className = "btn-text";
+    span.textContent = textNode.textContent.trim();
+    btn.replaceChild(span, textNode);
+    if (!btn.getAttribute("aria-label")) btn.setAttribute("aria-label", span.textContent);
+    if (!btn.getAttribute("title")) btn.setAttribute("title", span.textContent);
+  });
+  const badge = document.querySelector(".user-badge");                    // 「でログイン中」の span がなければ作る（古いHTML用）
+  if (badge && !badge.querySelector(".login-suffix")) {
+    const suffix = document.createElement("span");
+    suffix.className = "login-suffix";
+    suffix.textContent = "でログイン中";
+    badge.appendChild(suffix);
+  }
+}
+
+function updateHeaderAuthMobile() {                                       // 画面幅で右上の文字を出す／隠す（CSSのキャッシュに頼らない）
+  const isMobile = window.innerWidth < 640;                               // サイトのスマホ／PCの境目と同じ 640px
+  document.querySelectorAll(".header-auth .btn-text, .header-auth .login-suffix").forEach(elm => {
+    elm.style.display = isMobile ? "none" : "";                           // スマホは隠す、PCは style を消してCSSに任せる
+  });
 }
 
 function applyTeacherLock() {                                             // ログイン中は「担当」の欄を本人に固定（他の先生の名前で登録できないように）
@@ -608,12 +643,17 @@ function handleFormSubmit(event) {                                        // 「
   const taskData = { teacher, type, date, time, endTime, text, studentSupport: el("studentSupportInput").value };  // 保存する予定のデータ
 
   if (editingTaskId) {                                                    // ―― 編集中なら、上書き保存 ――
-    if (isFirebaseConnected && db) {
-      db.ref("tasks/" + editingTaskId).update(taskData);
-    } else {
-      const task = tasks.find(t => t.id === editingTaskId);
-      if (task) Object.assign(task, taskData);                            // 元の予定に新しい内容を上書き
-      saveTasksToStorage();
+    try {
+      if (isFirebaseConnected && db) {
+        const result = db.ref("tasks/" + editingTaskId).update(taskData);  // 保存（失敗しても編集モードは終わらせる）
+        if (result && typeof result.catch === "function") result.catch(e => console.warn("予定の保存に失敗しました:", e));
+      } else {
+        const task = tasks.find(t => t.id === editingTaskId);
+        if (task) Object.assign(task, taskData);                            // 元の予定に新しい内容を上書き
+        saveTasksToStorage();
+      }
+    } catch (e) {
+      console.warn("予定の保存に失敗しました:", e);                        // 保存でエラーになっても、ここで止めない
     }
     pendingDuplicateId = null;                                            // 複製した予定も、保存したので確定
     return cancelEdit();                                                  // 編集モードを終わる
@@ -628,11 +668,13 @@ function handleFormSubmit(event) {                                        // 「
       renderSchedule();
     }
     ["taskInput", "startHourInput", "startMinuteInput", "endHourInput", "endMinuteInput"].forEach(id => { el(id).value = ""; });  // 入力欄を空に戻す
-    setMinuteInputMode("startMinuteInput", false);                      // 分の選択肢を15分刻みに戻す
-    setMinuteInputMode("endMinuteInput", false);
-    TIME_CHECKS.forEach(id => { el(id).checked = false; });               // チェックを外す
-    el("studentSupportInput").value = "不可";
-    updateAllDayUI();
+    try {
+      setMinuteInputMode("startMinuteInput", false);                      // 分の選択肢を15分刻みに戻す
+      setMinuteInputMode("endMinuteInput", false);
+      TIME_CHECKS.forEach(id => { el(id).checked = false; });               // チェックを外す
+      el("studentSupportInput").value = "不可";
+      updateAllDayUI();
+    } catch (e) { console.warn("入力欄の片付けでエラーがありました:", e); }
   };
 
   runWithAuth(teacher, `スケジュールを追加するには、${teacher}のパスワードを入力してください`, addTask);  // ログインしていなければパスワードを確認してから追加
@@ -675,21 +717,28 @@ function startEditTask(id) {                                              // 予
 }
 
 function cancelEdit() {                                                   // 編集をやめて、フォームを「追加用」に戻す
+  // 途中の1つでもエラーになると、ここから先が止まって「編集中」のまま残る。
+  // だから編集終了だけは必ず実行する（try/finally）。
   if (pendingDuplicateId && editingTaskId === pendingDuplicateId) {       // 複製してすぐキャンセルしたら、その複製を消す
     removeTasks([pendingDuplicateId]);
   }
   pendingDuplicateId = null;
   editingTaskId = null;
 
-  el("scheduleForm").reset();                                             // 入力欄を全部初期状態に戻す
-  setMinuteInputMode("startMinuteInput", false);                        // 分の選択肢を15分刻みに戻す
-  setMinuteInputMode("endMinuteInput", false);
-  el("dateInput").value = getTodayFormatted();
-  updateAllDayUI();
-  updateTaskRequired();
-  applyTeacherLock();
-  setFormMode(false);
-  renderSchedule();
+  try {
+    el("scheduleForm").reset();                                           // 入力欄を全部初期状態に戻す
+    setMinuteInputMode("startMinuteInput", false);                        // 分の選択肢を15分刻みに戻す
+    setMinuteInputMode("endMinuteInput", false);
+    el("dateInput").value = getTodayFormatted();
+    updateAllDayUI();
+    updateTaskRequired();
+    applyTeacherLock();
+  } catch (e) {
+    console.warn("編集の終了処理でエラーがありました:", e);              // ここで止めても、編集モードの解除は下で必ず行う
+  } finally {
+    try { setFormMode(false); } catch (e) { console.warn("編集モードの解除に失敗しました:", e); }  // フォームを「追加用」に戻す
+    try { renderSchedule(); } catch (e) { console.warn("一覧の描き直しに失敗しました:", e); }      // 一覧を描き直す（編集中の札を消す）
+  }
 }
 
 function duplicateTask(id) {                                              // 予定をコピーして、そのまま編集画面で開く
