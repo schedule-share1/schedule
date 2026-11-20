@@ -493,6 +493,18 @@ function updateTimeValidity(id) {                                         // 入
   el(id).setCustomValidity(v !== "" && Number(v) > max ? `${isHour ? "時" : "分"}は0〜${max}の数字で入力してください` : "");
 }
 
+const timeMenus = {};                                                     // 時間欄の候補リスト（<ul>）をIDごとに覚えておく場所
+
+function setMinuteInputMode(id, oneMinute) {                             // 分の候補リストを作り直す（false＝00,15,30,45 の15分刻みに戻す）
+  const menu = timeMenus[id];                                             // まだ作られていなければ何もしない
+  if (!menu) return;
+  const values = oneMinute ? 60 : 4;                                      // true なら00〜59 の1分刻み、false なら15分刻み
+  menu.innerHTML = Array.from({ length: values }, (_, i) => {
+    const v = String(oneMinute ? i : i * 15).padStart(2, "0");
+    return `<li data-value="${v}">${v}</li>`;
+  }).join("");
+}
+
 function setupTimeInput(id) {                                             // 時・分の入力欄を「数字だけ打てる」「時を打ち終えたら分へ移る」ようにする
   const input = el(id);
   const isHour = id.includes("Hour");
@@ -521,6 +533,7 @@ function setupTimeInput(id) {                                             // 時
     return `<li data-value="${v}">${v}</li>`;
   }).join("");
   field.appendChild(menu);
+  timeMenus[id] = menu;                                                   // setMinuteInputMode が作り直せるように覚えておく
 
   const closeMenu = () => menu.classList.add("hidden");
   const openMenu = () => {
@@ -543,7 +556,18 @@ function setupTimeInput(id) {                                             // 時
     if (isHour) minuteInput.focus();                                       // 「時」を選んだら「分」の欄へ移る
   });
   document.addEventListener("click", e => { if (!field.contains(e.target)) closeMenu(); });  // 外側を押したら閉じる
-  input.addEventListener("keydown", e => { if (e.key === "Escape") closeMenu(); });          // Escキーでも閉じる
+  // Enter：フォームの暗黙送信にしない（送信すると handleFormSubmit が走り、入力欄が空にされる）。
+  // 分を確定して次の欄へ移るだけにする。開始時→開始分、開始分→終了時、終了時→終了分、終了分→予定・内容。
+  const nextTimeInputId = { startHourInput: "startMinuteInput", startMinuteInput: "endHourInput", endHourInput: "endMinuteInput", endMinuteInput: "taskInput" }[id];
+  input.addEventListener("keydown", e => {
+    if (e.key === "Escape") return closeMenu();                           // Escキーでも閉じる
+    if (e.key !== "Enter") return;
+    e.preventDefault();                                                   // 暗黙送信（＝フォーム送信）を止める
+    closeMenu();
+    const next = nextTimeInputId ? el(nextTimeInputId) : null;
+    if (next && !next.disabled) next.focus();                             // 次の欄へ移る（blur で1桁は0付きにそろう）
+    else input.blur();
+  });
   input.addEventListener("input", closeMenu);                                // 文字を打ち始めたら閉じる
 
   input.addEventListener("input", e => { if (!e.isComposing) sanitize(); });  // 日本語入力の変換中は触らない
