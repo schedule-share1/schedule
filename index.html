@@ -53,6 +53,12 @@
 
     <main class="main">
 
+      <!-- ===== ブラウザ内保存モードのお知らせ（Firebaseにつながらないときだけ表示） ===== -->
+      <div id="localModeNotice" class="notice hidden" role="status">          <!-- いまはこの端末だけに保存していて、他の人とは共有されないことを知らせる -->
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>いまはこの端末のブラウザ内だけに保存しています。予定は他の先生とは共有されません。</span>
+      </div>
+
       <!-- ===== 予定の登録フォーム ===== -->
       <section class="form-card">
         <h2 class="form-title">
@@ -173,7 +179,7 @@
 
         <section class="filter-section">
           <div class="section-head">
-            <h2 class="section-title"><i class="fa-solid fa-calendar-days icon-accent"></i> 日にちで絞り込み（今日から1週間後まで）</h2>
+            <h2 class="section-title"><i class="fa-solid fa-calendar-days icon-accent"></i> 日にちで絞り込み（今日から1週間）</h2>
             <span id="currentDateLabel" class="section-status">表示中: すべての日</span>
           </div>
           <div id="dateTabs" class="tab-row"></div>                             <!-- 日にちのタブが入る場所 -->
@@ -257,7 +263,7 @@
   <!-- ===== 確認ダイアログ（削除の確認など） ===== -->
   <div id="customModal" class="modal-overlay modal-overlay--fade is-faded hidden">
     <div class="modal-card modal-card--pop" id="modalCard">
-      <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>  <!-- ⚠ マーク -->
+      <div id="modalIcon" class="modal-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>  <!-- ⚠ マーク（「同じ予定があります」のときだけ、黄色の「？」の三角に JS が入れ替える） -->
       <h3 id="modalTitle" class="modal-title">削除の確認</h3>                   <!-- タイトル・文・ボタンの文字は JS が入れ替える -->
       <p id="modalMessage" class="modal-message">この処理を実行しますか？</p>
       <div class="modal-actions">
