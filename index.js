@@ -43,6 +43,8 @@ let db = null;                                                            // Fir
 let tasksRef = null;                                                      // データベースの中の「tasks（予定）」の場所
 let isFirebaseConnected = false;                                          // Firebaseにつながっているか（true / false）
 let tasks = [];                                                           // 全ての予定を入れておく配列（リスト）
+let hasLoadedData = false;                                                // 予定の読み込みが終わったか（それまでは「読み込み中」と表示する）
+let loadTimedOut = false;                                                 // 一定時間たっても読み込めなかったか
 const filters = { teacher: 'ALL', date: 'ALL', type: 'ALL' };             // 絞り込みの状態（'ALL' は「すべて表示」の意味）
 let lastCheckedDate = null;                                               // 最後に確認した「今日」の日付（0時を過ぎたか調べるため）
 let lastEndedSignature = "";                                              // 終了済みの予定IDをつなげた文字列（変化に気づくため）
@@ -70,6 +72,12 @@ document.addEventListener("DOMContentLoaded", () => {                     // HTM
   el("typeSelect").innerHTML = typeList.map(t => `<option value="${t}">${t}</option>`).join("");  // 種別の選択肢を一覧から自動で作る
   
   // 時・分の入力欄：キーボードで直接打てる。右の▼を押すと候補の一覧も出る
+  ["upcomingTaskList", "pastTaskList"].forEach(listId => {                // 予定カードのボタン（編集・複製・削除）を押したとき
+    el(listId).addEventListener("click", e => {                           // リストでまとめて受け取る（ボタンごとにonclickを書かない＝安全）
+      const btn = e.target.closest("button[data-action]");
+      if (btn) tryTaskAction(btn.dataset.action, btn.dataset.id);
+    });
+  });
   TIME_INPUTS.forEach(setupTimeInput);                                    // 4つの入力欄に「数字だけ」「範囲チェック」の仕組みをつける
   el("scheduleForm").addEventListener("reset", () => setTimeout(() => TIME_INPUTS.forEach(updateTimeValidity), 0));  // フォームをリセットしたら、エラー表示も消す
   el("targetTeacher").innerHTML += teacherList.map(t => `<option value="${t}">${t}</option>`).join("");  // パスワード変更画面（管理者用）の先生の選択肢を作る
@@ -94,19 +102,32 @@ document.addEventListener("DOMContentLoaded", () => {                     // HTM
 
 
 // ---------- 5. データの保存・読み込み ----------
+function isValidTask(t) {                                                 // 予定として使えるデータか（日付が「2026-11-10」の形で、先生名がある）
+  return !!t && typeof t === "object" && /^\d{4}-\d{2}-\d{2}$/.test(t.date || "") && typeof t.teacher === "string";
+}
+
 function connectFirebase() {                                              // Firebaseにつないで、予定の変化を見張る
   try {
     if (typeof firebase === 'undefined') return initLocalStorageFallback();  // Firebaseの部品が読み込めていなければ、ブラウザ保存に切り替え
     firebase.initializeApp(firebaseConfig);                               // 接続情報を使って Firebase を準備
     db = firebase.database();                                             // データベースを取り出す
     tasksRef = db.ref("tasks");                                           // 「tasks」という場所を使う
+    setTimeout(() => {                                                    // 8秒たっても読み込めなければ、お知らせを出す（圏外・通信制限など）
+      if (!hasLoadedData) { loadTimedOut = true; renderSchedule(); }
+    }, 8000);
 
     db.ref("passwords").on("value", snap => applyPasswordOverrides(snap.val()), () => {});  // 変更されたパスワードも見張る（読めない設定でも、エラーにはしない）
 
     tasksRef.on("value", snapshot => {                                    // データが変わるたびに（他の先生が書き込んだときも）ここが動く
       isFirebaseConnected = true;
+      el("localModeNotice").classList.add("hidden");                      // つながったのでお知らせは消す
       const data = snapshot.val() || {};                                  // 中身を取り出す（空なら空のオブジェクト）
-      tasks = Object.keys(data).map(key => ({ id: key, ...data[key] }));  // { ID: 予定 } の形を [予定, 予定, …] の配列に変換
+      tasks = Object.keys(data).map(key => ({ id: key, ...data[key] })).filter(isValidTask);  // { ID: 予定 } の形を [予定, 予定, …] の配列に変換（壊れたデータは除く）
+      hasLoadedData = true;                                               // 読み込みができた
+      if (editingTaskId && !tasks.some(t => t.id === editingTaskId)) {    // 編集中の予定が（他の端末で）削除されていたら編集を終わらせる
+        pendingDuplicateId = null;
+        cancelEdit();
+      }
       renderSchedule();                                                   // 画面を描き直す
     }, error => {                                                         // 接続できない・権限がないときは…
       console.warn("Firebaseに接続できないため、ブラウザ内保存に切り替えます:", error);
@@ -120,9 +141,11 @@ function connectFirebase() {                                              // Fir
 
 function initLocalStorageFallback() {                                     // ネットが使えないときの予備：ブラウザ内（localStorage）に保存する
   isFirebaseConnected = false;
+  el("localModeNotice").classList.remove("hidden");                       // 「この端末だけに保存されます」のお知らせを表示
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) {}  // 保存してある文字列を予定のデータに戻す
-  tasks = Array.isArray(saved) ? saved : getSampleData();                 // 保存がなければ見本データを使う
+  hasLoadedData = true;
+  tasks = Array.isArray(saved) ? saved.filter(isValidTask) : getSampleData();  // 保存がなければ見本データを使う（壊れたデータは除く）
   saveTasksToStorage();
   renderSchedule();
 }
@@ -228,6 +251,7 @@ function setLogin(teacher, master) {                                      // ロ
   isMaster = master;
   session.set("loggedInTeacher", teacher);
   session.set("isMaster", master ? "1" : null);
+  if (editingTaskId) { pendingDuplicateId = null; cancelEdit(); }         // 編集の途中でログイン／ログアウトしたら、編集は取りやめる（権限のない人が保存できないように）
   updateLoginUI();
 }
 
@@ -496,6 +520,7 @@ function updateAllDayUI() {                                               // チ
   const disableEnd = el("allDayEnd").checked || el("undecidedEnd").checked;  // 終日・未定なら終了の「時」「分」は選べない
   el("endHourInput").disabled = disableEnd;
   el("endMinuteInput").disabled = disableEnd;
+  updateTimeValidity();                                                   // 使える／使えないが変わったので、エラー表示も更新
 }
 
 function getSplitTimeValue(hourId, minuteId) {                            // 「時」と「分」の入力をつなげて "15:30" の形にする（入力がおかしければ空文字）
@@ -521,11 +546,20 @@ function toHalfWidthDigits(str) {                                         // 全
   return (str || "").replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
 }
 
-function updateTimeValidity(id) {                                         // 入力が範囲外のとき、送信時にブラウザが出す注意文をセットする
-  const isHour = id.includes("Hour");
-  const max = isHour ? 23 : 59;
-  const v = el(id).value;
-  el(id).setCustomValidity(v !== "" && Number(v) > max ? `${isHour ? "時" : "分"}は0〜${max}の数字で入力してください` : "");
+function updateTimeValidity() {                                           // 時間入力のエラー表示を最新にする（範囲外／終了が開始より前のとき、送信時にブラウザが注意文を出す）
+  TIME_INPUTS.forEach(id => {                                             // ① 4つの欄それぞれの「範囲チェック」（時は0〜23、分は0〜59）
+    const isHour = id.includes("Hour");
+    const max = isHour ? 23 : 59;
+    const v = el(id).value;
+    el(id).setCustomValidity(v !== "" && Number(v) > max ? `${isHour ? "時" : "分"}は0〜${max}の数字で入力してください` : "");
+  });
+
+  const start = parseTime(getSplitTimeValue("startHourInput", "startMinuteInput"));  // ② 開始と終了の「前後チェック」
+  const end = parseTime(getSplitTimeValue("endHourInput", "endMinuteInput"));
+  const bothTyped = !el("startHourInput").disabled && !el("endHourInput").disabled;  // 「一日」「未定」「終日」で使っていないときだけ比べる
+  if (bothTyped && start !== null && end !== null && end < start && el("endHourInput").validity.valid) {
+    el("endHourInput").setCustomValidity("終了時間は開始時間より後にしてください");
+  }
 }
 
 const timeMenus = {};                                                     // 時間欄の候補リスト（<ul>）をIDごとに覚えておく場所
@@ -642,7 +676,11 @@ function handleFormSubmit(event) {                                        // 「
 
   const taskData = { teacher, type, date, time, endTime, text, studentSupport: el("studentSupportInput").value };  // 保存する予定のデータ
 
-  if (editingTaskId) {                                                    // ―― 編集中なら、上書き保存 ――
+  if (isTaskExpiredOverOneDay(taskData)) {                                // 終わって1日以上たつ予定は、保存してもすぐ自動削除されて消えてしまう
+    return showModal({ title: "この日付では保存できません", message: "終了してから1日以上たった予定は自動で削除されるため、保存できません。日付や時間を確認してください。", confirmText: "OK", isDanger: false });
+  }
+
+  const saveEdit = () => {                                                // ―― 編集中の予定を、上書き保存する処理 ――
     try {
       if (isFirebaseConnected && db) {
         const result = db.ref("tasks/" + editingTaskId).update(taskData);  // 保存（失敗しても編集モードは終わらせる）
@@ -656,8 +694,8 @@ function handleFormSubmit(event) {                                        // 「
       console.warn("予定の保存に失敗しました:", e);                        // 保存でエラーになっても、ここで止めない
     }
     pendingDuplicateId = null;                                            // 複製した予定も、保存したので確定
-    return cancelEdit();                                                  // 編集モードを終わる
-  }
+    cancelEdit();                                                         // 編集モードを終わる
+  };
 
   const addTask = () => {                                                 // ―― 新しい予定を追加する処理 ――
     if (isFirebaseConnected && tasksRef) {
@@ -677,7 +715,34 @@ function handleFormSubmit(event) {                                        // 「
     } catch (e) { console.warn("入力欄の片付けでエラーがありました:", e); }
   };
 
-  runWithAuth(teacher, `スケジュールを追加するには、${teacher}のパスワードを入力してください`, addTask);  // ログインしていなければパスワードを確認してから追加
+  if (!editingTaskId && db && !isFirebaseConnected) {                     // Firebaseにまだつながっていない間に追加すると、あとで消えてしまうので止める
+    return showModal({ title: "接続中です", message: "データベースに接続中です。数秒待ってからもう一度お試しください。", confirmText: "OK", isDanger: false });
+  }
+
+  const isSavingEdit = !!editingTaskId;                                   // 編集の保存か、新規追加か
+  const proceed = () => {                                                 // 実際に保存・追加する処理
+    if (isSavingEdit) saveEdit();
+    else runWithAuth(teacher, `スケジュールを追加するには、${teacher}のパスワードを入力してください`, addTask);  // ログインしていなければパスワードを確認してから追加
+  };
+
+  if (findIdenticalTask(taskData)) {                                      // 全く同じ予定がすでにあるときは、確認してから進む
+    const verb = (!isSavingEdit || editingTaskId === pendingDuplicateId) ? "追加" : "保存";  // 複製した予定を確定するときも「追加」
+    return showModal({ title: "同じ予定があります", message: `全く同じ内容の予定がすでにあります。${verb}しますか？`, confirmText: `${verb}する`, isDanger: false, variant: "warn", onConfirm: proceed });
+  }
+  proceed();
+}
+
+
+function findIdenticalTask(data) {                                        // 入力した内容と「全く同じ」予定がすでにあれば、それを返す（なければ undefined）
+  const keyOf = t => [                                                    // 比べる項目を1つの文字列にまとめる（これが同じなら全く同じ予定）
+    t.teacher, t.type, t.date,
+    isAllDayValue(t.time) ? "一日" : t.time,                              // 昔の「１日中」も「一日」として比べる
+    isAllDayValue(t.endTime) ? "一日" : t.endTime,
+    (t.text || "").trim(),
+    normalizeStudentSupport(t.studentSupport)
+  ].join("\u0001");
+  const key = keyOf(data);
+  return tasks.find(t => t.id !== editingTaskId && keyOf(t) === key);     // 編集中の予定自身は比べない
 }
 
 
@@ -698,7 +763,7 @@ function startEditTask(id) {                                              // 予
   const undecidedEnd = task.endTime === "未定";
 
   el("teacherSelect").value = task.teacher;                               // 各入力欄に予定の内容を入れる
-  el("typeSelect").value = task.type;
+  el("typeSelect").value = typeList.includes(task.type) ? task.type : "その他";  // 一覧にない種別は「その他」にする（空のまま保存されないように）
   el("dateInput").value = task.date;
   el("studentSupportInput").value = normalizeStudentSupport(task.studentSupport);
   el("allDayStart").checked = allDayStart;
@@ -774,13 +839,20 @@ function duplicateTask(id) {                                              // 予
   else setTimeout(() => startEditTask(newId), 300);                       // Firebaseからの反映を少し待ってから編集
 }
 
+function releaseEditIfDeleted(ids) {                                      // いま編集中の予定が削除されるなら、編集モードも終わらせる（消えた予定を保存してしまわないように）
+  if (editingTaskId && ids.includes(editingTaskId)) {
+    pendingDuplicateId = null;                                            // 削除はこのあと行うので、cancelEdit に二重で消させない
+    cancelEdit();
+  }
+}
+
 function requestDeleteTask(id) {                                          // 1件削除の確認画面を出す
   showModal({
     title: "予定の削除",
     message: "この予定を削除してもよろしいですか？",
     confirmText: "削除する",
     isDanger: true,
-    onConfirm: () => { removeTasks([id]); renderSchedule(); }             // 「削除する」を押したら実行
+    onConfirm: () => { releaseEditIfDeleted([id]); removeTasks([id]); renderSchedule(); }  // 「削除する」を押したら実行
   });
 }
 
@@ -800,15 +872,24 @@ function requestDeletePastTasks() {                                       // 「
     confirmText: `${pastCount} 件を削除`,
     isDanger: true,
     onConfirm: () => {                                                    // 押した瞬間に終了している予定をまとめて削除
-      removeTasks(tasks.filter(t => isTaskEnded(t)).map(t => t.id));
+      const ids = tasks.filter(t => isTaskEnded(t)).map(t => t.id);
+      releaseEditIfDeleted(ids);
+      removeTasks(ids);
       renderSchedule();
     }
   });
 }
 
-function showModal({ title, message, confirmText, isDanger, onConfirm }) {  // 確認ダイアログを開く（onConfirm＝OKで実行する処理）
+let modalHideTimer = null;                                                // 確認画面を隠すタイマー（すぐ開き直したときに取り消すために覚えておく）
+
+const ICON_DANGER = '<i class="fa-solid fa-triangle-exclamation"></i>';  // 赤い三角の「！」（ふだんのアイコン）
+const ICON_QUESTION = '<svg viewBox="0 0 24 24" width="1.45em" height="1.45em" aria-hidden="true"><path d="M12 2.8 22.2 20.6H1.8Z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.7 10.3a2.4 2.4 0 1 1 3.5 2.1c-.8.5-1.2 1-1.2 1.9" fill="none" stroke="#131c30" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="17.6" r="1.1" fill="#131c30"/></svg>';  // 黄色の三角の「？」
+
+function showModal({ title, message, confirmText, isDanger, onConfirm, variant }) {  // 確認ダイアログを開く（onConfirm＝OKで実行する処理／variant:"warn"で黄色の「？」アイコン）
   el("modalTitle").textContent = title;
   el("modalMessage").textContent = message;
+  el("modalIcon").classList.toggle("modal-icon--warn", variant === "warn");  // 黄色にするか
+  el("modalIcon").innerHTML = variant === "warn" ? ICON_QUESTION : ICON_DANGER;  // 「？」か「！」か
   const btn = el("modalConfirmBtn");
   btn.textContent = confirmText;
   btn.className = "modal-btn " + (isDanger ? "modal-btn--danger" : "modal-btn--primary");  // 危険な操作なら赤いボタン
@@ -816,6 +897,7 @@ function showModal({ title, message, confirmText, isDanger, onConfirm }) {  // �
     if (onConfirm) onConfirm();                                           // …処理を実行して
     closeModal();                                                         // …閉じる
   };
+  clearTimeout(modalHideTimer);                                           // 閉じる途中だったら、隠す予定を取り消す
   el("customModal").classList.remove("hidden");
   setTimeout(() => {                                                      // 少し待ってからふわっと表示（アニメーション）
     el("customModal").classList.remove("is-faded");
@@ -826,7 +908,7 @@ function showModal({ title, message, confirmText, isDanger, onConfirm }) {  // �
 function closeModal() {                                                   // 確認ダイアログを閉じる
   el("customModal").classList.add("is-faded");                            // まず薄くして
   el("modalCard").classList.remove("is-open");
-  setTimeout(() => el("customModal").classList.add("hidden"), 200);       // 0.2秒後に完全に隠す
+  modalHideTimer = setTimeout(() => el("customModal").classList.add("hidden"), 200);  // 0.2秒後に完全に隠す
 }
 
 
@@ -843,13 +925,14 @@ function renderSchedule() {                                               // 予
 
   const timeKey = t => isAllDayValue(t.time) ? "00:00" : t.time === "未定" ? "99:99" : (t.time || "");  // 並べ替え用：一日は先頭、未定は最後
   const shown = tasks
-    .filter(t => (filters.teacher === 'ALL' || t.teacher === filters.teacher)  // 絞り込み：先生
+    .filter(t => t.id === editingTaskId                                   // 編集中の予定は、絞り込みに関係なく必ず表示する
+              || ((filters.teacher === 'ALL' || t.teacher === filters.teacher)  // 絞り込み：先生
               && (filters.type === 'ALL' || t.type === filters.type)      // 絞り込み：種別
-              && (filters.date === 'ALL' || t.date === filters.date))     // 絞り込み：日にち
+              && (filters.date === 'ALL' || t.date === filters.date)))    // 絞り込み：日にち
     .sort((a, b) => {                                                     // 並べ替え
       if (a.id === editingTaskId) return -1;                              // 編集中の予定はいちばん上
       if (b.id === editingTaskId) return 1;
-      if (a.date !== b.date) return a.date.localeCompare(b.date);         // 日付の早い順
+      if (a.date !== b.date) return String(a.date).localeCompare(String(b.date));  // 日付の早い順
       return timeKey(a).localeCompare(timeKey(b));                        // 同じ日なら時間の早い順
     });
 
@@ -863,7 +946,10 @@ function renderSchedule() {                                               // 予
   });
 
   // 予定が0件のときのメッセージ
-  if (upcomingCount === 0) upcomingList.innerHTML = `<li class="empty-card"><i class="fa-solid fa-calendar-check empty-icon"></i><p class="empty-text">該当する今後の予定はありません</p></li>`;
+  const emptyMessage = hasLoadedData ? "該当する今後の予定はありません"                      // 予定が0件のときの文言（読み込み状況で変える）
+    : loadTimedOut ? "予定を読み込めません。インターネットの接続を確認してください"
+    : "予定を読み込み中です…";
+  if (upcomingCount === 0) upcomingList.innerHTML = `<li class="empty-card"><i class="fa-solid fa-calendar-check empty-icon"></i><p class="empty-text">${emptyMessage}</p></li>`;
   if (pastCount === 0) pastList.innerHTML = `<li class="empty-small">終了した予定はありません</li>`;
 
   lastEndedSignature = getEndedSignature();                               // 今の「終了済み」の状態を覚えておく
@@ -933,7 +1019,7 @@ function createTaskCardElement(task, isPast, isToday) {                   // 予
         <span class="support-mark ${support.cls}">${support.mark}</span>
       </div>
       ${canEdit ? ACTION_BUTTONS.map(b => `
-        <button onclick="tryTaskAction('${b.action}', '${task.id}')" title="${b.title}" class="icon-btn${b.cls}"><i class="${b.icon}"></i></button>`).join("") : ''}
+        <button data-action="${b.action}" data-id="${escapeHtml(task.id)}" title="${b.title}" class="icon-btn${b.cls}"><i class="${b.icon}"></i></button>`).join("") : ''}
     </div>`;
   return li;
 }
